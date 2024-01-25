@@ -412,6 +412,26 @@ class irbgrab_obj(object):
         res=res & MASK
         if res==hirb.IRBG_RET_SUCCESS: self._img_pointer=None
         return hex(res)
+
+    def get_dataex_easy(self,img_type): #vérifier éventuellement si l'image précédente a été modifiée
+        res=self.get_dataex(img_type)
+        if int(res,16)==hirb.IRBG_RET_SUCCESS:
+            dim=self.get_dimensions()
+            if int(dim[0],16)==hirb.IRBG_RET_SUCCESS:
+                img_shape=(dim[2],dim[1])
+                ptr=self.get_dataptr()
+                if int(ptr[0],16)==hirb.IRBG_RET_SUCCESS:                    
+                    if img_type==1 or img_type==int('01000000',16): data_ptr=ct.cast(ptr[1],ct.POINTER(ct.c_uint32))
+                    elif img_type==2: data_ptr=ct.cast(ptr[1],ct.POINTER(ct.c_uint16))
+                    elif img_type==3: data_ptr=ct.cast(ptr[1],ct.POINTER(ct.c_float))
+                    elif img_type==4: data_ptr=ct.cast(ptr[1],ct.POINTER(ct.c_uint8))
+                    elif img_type==0: data_ptr=None #???
+                    image=np.ctypeslib.as_array(data_ptr,shape=img_shape).copy()
+                    res=self.free_mem() 
+                    return (res, image)
+                else: return (ptr[0],)
+            else: return (dim[0],)
+        else: return (res,)
     
     def get_data_easy(self,img_type): #vérifier éventuellement si l'image précédente a été modifiée
         res=self.get_data(img_type)
@@ -435,6 +455,29 @@ class irbgrab_obj(object):
         
     def get_data_easy_noFree(self,img_type): #vérifier éventuellement si l'image précédente a été modifiée
         res=self.get_data(img_type)
+        if int(res,16)==hirb.IRBG_RET_SUCCESS:
+            dim=self.get_dimensions()
+            if int(dim[0],16)==hirb.IRBG_RET_SUCCESS:
+                img_shape=(dim[2],dim[1])
+                ptr=self.get_dataptr()
+                if int(ptr[0],16)==hirb.IRBG_RET_SUCCESS:                    
+                    if img_type==1 or img_type==int('01000000',16): data_ptr=ct.cast(ptr[1],ct.POINTER(ct.c_uint32))
+                    elif img_type==2: data_ptr=ct.cast(ptr[1],ct.POINTER(ct.c_uint16))
+                    elif img_type==3: data_ptr=ct.cast(ptr[1],ct.POINTER(ct.c_float))
+                    elif img_type==4: data_ptr=ct.cast(ptr[1],ct.POINTER(ct.c_uint8))
+                    elif img_type==0: data_ptr=None #???
+                    try:
+                        image=np.ctypeslib.as_array(data_ptr,shape=img_shape).copy()
+                        return (hex(hirb.IRBG_RET_SUCCESS), image)
+                    except NotImplementedError:
+                        return (hex(hirb.IRBG_RET_ERROR),)
+                    # res=self.free_mem() 
+                else: return (ptr[0],)
+            else: return (dim[0],)
+        else: return (res,)
+
+    def get_dataex_easy_noFree(self,img_type): #vérifier éventuellement si l'image précédente a été modifiée
+        res=self.get_dataex(img_type)
         if int(res,16)==hirb.IRBG_RET_SUCCESS:
             dim=self.get_dimensions()
             if int(dim[0],16)==hirb.IRBG_RET_SUCCESS:

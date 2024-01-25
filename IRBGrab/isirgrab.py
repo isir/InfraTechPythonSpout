@@ -16,7 +16,6 @@ import ctypes as ct
 try:
     from IRBGrab import irbgrab as irbg
     from IRBGrab import hirbgrab as hirb
-    print('IRBGrab module imported')
 except (ImportError, ModuleNotFoundError):
     print('Pb import IRBGrab module')
 
@@ -34,17 +33,20 @@ class STATES(Enum):
     Connected = 4
     Grabbing = 5
 
-t = time.perf_counter()
-tLive = t
-lock = threading.Lock()
-ev_has_fname = threading.Event()
+    def __lt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value < other.value
+        return NotImplemented
 
 def callback(context,*args):#, aHandle, aStreamIndex):
     context.updateStreamIR()
 
-
 class IsirIrbGrab:
+    type_rgba = np.dtype((np.uint32, {'r':(np.uint8,0),'g':(np.uint8,1),'b':(np.uint8,2), 'a':(np.uint8,3)}))
+
     def __init__(self, min, max):
+        self.frame = None
+        self.frame_rgb = None
         self.__min = min+273.15
         self.__max = max+273.15
         print(f"Capture range from T {min} ({self.__min} K) to {max} ({self.__max} K)")
@@ -57,9 +59,11 @@ class IsirIrbGrab:
         self.__show_window = False
         self.autolevel_checked_val = False
         self.__spouts = {}
-        self.__spoutsName = {}
         self.vscale = np.vectorize(self.scale)
-        self.frame = None
+        
+        self.__t = time.perf_counter()
+        self.__tStart = self.__t
+        self.__lock = threading.Lock()
 
     def scale(self, v):
         return (v-self.__min)/self.__maxmin
@@ -143,11 +147,11 @@ class IsirIrbGrab:
         else:
             print('free_device: Failed')
 
-    def initSpout(self, name, index):
-        self.__spoutsName[index] = name
-        self.__spouts[index] = SpoutGL.SpoutSender()
-        self.__spouts[index].setSenderName(name)
-        print(f"Spout stream {index} to: {name}")
+    def initSpout(self, index):
+        name = self.getSpoutName(index)
+        self.__spouts[name] = SpoutGL.SpoutSender()
+        self.__spouts[name].setSenderName(name)
+        print(f"Spout stream to: {name}")
 
     def connect(self):
         if self.__state != STATES.DeviceCreated:
@@ -167,19 +171,23 @@ class IsirIrbGrab:
                 if hirb.TIRBG_RetDef[res] == 'Success':
                     self.__state = STATES.Connected
                     self.grab(0)
+                    self.irbgrab_object.setparam_int32(181, 1); self.grab(1)
                     #self.irbgrab_object.setparam_int32(181, 1); self.grab(1)
                 else:
                     raise Exception('set callback error: ' + hirb.TIRBG_RetDef[res])
-            else: raise Exception('connect error: '+hirb.TIRBG_RetDef[res])
+            else: raise Exception('Connect error: '+hirb.TIRBG_RetDef[res])
         else: raise Exception('state error: '+hirb.TIRBG_RetDef[res])
 
+    def getSpoutName(self, idx):
+        return f"{self.__selectedDeviceName}_{idx}"
+
     def grab(self, index):
-        if self.__state not in (STATES.Connected, STATES.Grabbing):
+        if self.__state < STATES.Connected:
             print("Can't grab at this state")
             return
         res = self.irbgrab_object.startgrab(index)
         if hirb.TIRBG_RetDef[res] == 'Success':
-            self.initSpout(f"{self.__selectedDeviceName}_{index}", index)
+            self.initSpout(index)
             print(f'Grabbing stream {index}')
             self.__state = STATES.Grabbing
             #print("NeedBitmap32: ", self.irbgrab_object.setparam_int32(IRBG_PARAM_SDK_NeedBitmap32, 1))
@@ -187,7 +195,7 @@ class IsirIrbGrab:
             raise Exception('startgrab error: ' + hirb.TIRBG_RetDef[res])
 
     def disconnect(self):
-        if self.__state != STATES.Connected:
+        if self.__state not in (STATES.Connected, STATES.Grabbing):
             print("Can't disconnect at this state")
             return
         res = self.irbgrab_object.stopgrab(self.__grabIndex)
@@ -201,67 +209,96 @@ class IsirIrbGrab:
         else:
             print('stopgrab error: '+hirb.TIRBG_RetDef[res])
 
+    def sendSpout(self, frame, index):
+        name = self.getSpoutName(index)
+        self.__spouts[name].sendImage(frame, frame.shape[1], frame.shape[0], GL.GL_RGB, False, 1)
+
     def updateStreamIR(self):
         if self.__state != STATES.Grabbing:
             print("Can't updateStreamIR at this state")
             return
 
-        global t
-        global tLive
-        now = time.perf_counter()
-        # print(now-t)
-        t = now
+        self.__t = time.perf_counter()
 
         #streamCount = self.irbgrab_object.getparam_int32(hirb.IRBG_PARAM_Stream_Count); print(f"streamCount: {streamCount}")
 
-        # handle every image
+        # handle every RGB
         try:
-            res = self.irbgrab_object.get_data_easy_noFree(3) #1:uint32, 2:uint16, 3:float32,4:uint8
-            #res2 = self.irbgrab_object.get_dataex(1)
+            res = self.irbgrab_object.get_dataex_easy_noFree(1) #1:uint32, 2:uint16, 3:float32,4:uint8
+            
+            # stream IR
+            if res[0] in hirb.TIRBG_RetDef.keys():
+                # res[1].shape should be (768, 1024)
+                if hirb.TIRBG_RetDef[res[0]] == 'Success' and len(res) >= 2 and res[1].shape[0] > 100:
+                    if self.__lock.acquire(False):                       
+                        frame = res[1]
+                        shape = frame.shape
+                        rgb = frame.view(dtype=IsirIrbGrab.type_rgba)
+                        rgb = np.array([rgb['r'],rgb['g'],rgb['b']]).reshape(shape[0],shape[1],3)
+                        frame = rgb                         
+                        
+                        self.sendSpout(frame, 1)#(768, 1024)
+                        self.frame_rgb = frame
+
+                        try:
+                            self.irbgrab_object.free_mem()
+                            # DEBUG
+                            #print('memory freed')
+                        except Exception as e:
+                            pass # print("Exception while freeing memory: ", e)
+                        self.__lock.release()               
+                else:
+                    print('Error when getting image: {}'.format(hirb.TIRBG_RetDef[res[0]]))            
+                    
         except Exception as e:
             print(f"Exception get_data_easy_noFree():\n{e}")
             return
-
-        # stream image
-        if res[0] in hirb.TIRBG_RetDef.keys():
-            if hirb.TIRBG_RetDef[res[0]] == 'Success' and len(res) >= 2 and res[1].shape[0] > 100:
-                if lock.acquire(False):
-                    if (t - tLive) > 0.04:  # 0.04
-                        frame = res[1]
+'''
+        # handle every IR
+        try:
+            res = self.irbgrab_object.get_data_easy_noFree(3) #1:uint32, 2:uint16, 3:float32,4:uint8
+            
+            # stream IR
+            if res[0] in hirb.TIRBG_RetDef.keys():
+                # res[1].shape should be (768, 1024)
+                if hirb.TIRBG_RetDef[res[0]] == 'Success' and len(res) >= 2 and res[1].shape[0] > 100:
+                    if self.__lock.acquire(False):
+                        #if (self.__t - self.__tStart) > 0.04:  # 0.04
+                        frame = res[1]                    
                         #print(frame.min(), frame.max())
                         frame = (frame-self.__min)/self.__ampl
                         frame = np.clip(frame, 0, 1)*255
 
                         frame = frame[:, :, np.newaxis].astype(np.uint8)
-                        #print(frame.shape, frame.dtype)
+                        #print(frame.shape, frame.dtype)                 
                         frame = cv.cvtColor(frame, cv.COLOR_GRAY2RGB)
-                        self.frame = frame
-                        self.__spouts[0].sendImage(frame, frame.shape[1], frame.shape[0], GL.GL_RGB, False, 1)#(768, 1024)
-                        tLive = t
-                    #else: print('Too slow')
-                    try:
-                        self.irbgrab_object.free_mem()
-                    except Exception as e:
-                        pass#print("Exception while freeing memory: ", e)
+                        
+                        self.sendSpout(frame, 0)#(768, 1024)
+                        self.frame_ir = frame
 
-                    lock.release()
-                # DEBUG
-                #print('memory freed')
-            else:
-                print('Error when getting image: {}'.format(hirb.TIRBG_RetDef[res[0]]))
+                        self.__tStart = self.__t                        
+                        #else: print('Too slow:', self.__t - self.__tStart)
 
+                        try:
+                            self.irbgrab_object.free_mem()
+                            # DEBUG
+                            #print('memory freed')
+                        except Exception as e:
+                            pass # print("Exception while freeing memory: ", e)
+                        self.__lock.release()               
+                else:
+                    print('Error when getting image: {}'.format(hirb.TIRBG_RetDef[res[0]]))            
 
-if __name__ == '__main__':
-    #i = IsirIrbGrab(10000000, 17000000) #numerical raw
-    i = IsirIrbGrab(25., 35.) # In degrees
-    i.load_dll()
-    i.create_device("variocamhd")
-    i.connect()
-    while True:
-        #time.sleep(.033)
-        i.updateStreamIR()
-        if cv.waitKey(1) & 0xFF == ord('q'):
-            break
-    i.disconnect()
-    i.free_device()
-    i.free_dll()
+        except Exception as e:
+            print(f"Exception get_data_easy_noFree():\n{e}")
+            return
+
+ '''   
+        
+        
+        
+           
+
+        
+        
+        
