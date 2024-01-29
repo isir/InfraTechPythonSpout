@@ -27,8 +27,10 @@ if __name__ == '__main__':
         try:
             print("--- Press CTRL+C to exit ---")
             while True:
-                time.sleep(.033)
-                #cv2.imshow("IR", i.frame_ir);if cv2.waitKey(1) & 0xFF == ord('q'): break
+                time.sleep(1/30)
+                if i.frame_ir_ok:
+                    cv2.imshow("IR", i.frame_ir); 
+                if cv2.waitKey(1) & 0xFF == ord('q'): break
         except KeyboardInterrupt:
             pass
 
