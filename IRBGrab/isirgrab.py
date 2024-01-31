@@ -5,7 +5,7 @@ import threading
 import pathlib as pl
 # infratec packages
 # try importing as namespace package
-from enum import Enum
+from enum import IntEnum
 
 import numpy as np
 import cv2 as cv
@@ -20,23 +20,18 @@ except (ImportError, ModuleNotFoundError):
     print('Pb import IRBGrab module')
 
 IRBG_PARAM_SDK_NeedBitmap32 = 181
-class IRBG_STREAMTYPE(Enum):
+class IRBG_STREAMTYPE(IntEnum):
     IRBG_STREAMTYPE_IR = 1
     IRBG_STREAMTYPE_VIS = 2
     IRBG_STREAMTYPE_SCREEN = 3
 
 
-class STATES(Enum):
+class STATES(IntEnum):
     Init = 1
     DLLLoaded = 2
     DeviceCreated = 3
     Connected = 4
     Grabbing = 5
-
-    def __lt__(self, other):
-        if self.__class__ is other.__class__:
-            return self.value < other.value
-        return NotImplemented
 
 def callback(context,*args):#, aHandle, aStreamIndex):
     #print(args)
