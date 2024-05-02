@@ -111,8 +111,8 @@ class IsirIrbGrab:
                 res = self.irbgrab_object.search()
                 success = False
                 if hirb.TIRBG_RetDef[res[0]] == 'Success':
-                    #                    if res[1]!=0:
-                    if True:
+                    if res[1]!=0:
+                    #if True:
                         success = True
                         self.searchstrings = self.irbgrab_object.get_search_strings()
                         for i in self.searchstrings: self.__devices.append(i)

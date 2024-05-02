@@ -2,6 +2,7 @@ import sys
 import time
 import argparse
 from IRBGrab import isirgrab as grab
+from pythonosc import udp_client
 import cv2
 
 
@@ -11,10 +12,15 @@ if __name__ == '__main__':
     parser.add_argument('--device', '-s', help="Device name to grab from", type=str, default="variocamhd")
     parser.add_argument('--min_t', help="Mininum temperature (°C)", type=float, default=25.)
     parser.add_argument('--max_t', help="Maximum temperature (°C)", type=float, default=36.)
+    parser.add_argument("--ip", default="127.0.0.1", help="The ip of the OSC server")
+    parser.add_argument("--port", type=int, default=10000, help="The port the OSC server is listening on")
+    
     args = parser.parse_args()
     device_name = args.device
     min_t = args.min_t
     max_t = args.max_t
+    osc_client = udp_client.SimpleUDPClient(args.ip, args.port)
+    frameid = 0
 
     try:
         i = grab.IsirIrbGrab(min_t, max_t) # In degrees
@@ -23,13 +29,19 @@ if __name__ == '__main__':
         print(f"Grabbing : {device_name}")
         #i.create_device("simulator")
         i.connect()
-        
+        spout_name = i.getSpoutName(0)
         try:
             print("--- Press CTRL+C to exit ---")
             while True:
                 time.sleep(1/30)
                 if i.frame_ir_ok:
-                    cv2.imshow("IR", i.frame_ir); 
+                    i.frame_ir = cv2.putText(i.frame_ir, f"Sharing to spout {spout_name}, T min {min_t}, max {max_t}", (50, 50) , cv2.FONT_HERSHEY_SIMPLEX  ,  
+                    0.5, (250, 250, 250), 1, cv2.LINE_AA) 
+                    cv2.imshow("IRBIS_Grap", i.frame_ir)                    
+                    if frameid%50==0:
+                        osc_client.send_message("/irbis/min_t", min_t)
+                        osc_client.send_message("/irbis/max_t", max_t)
+                    osc_client.send_message("/irbis/frameid", frameid); frameid +=1                    
                 if cv2.waitKey(1) & 0xFF == ord('q'): break
         except KeyboardInterrupt:
             pass

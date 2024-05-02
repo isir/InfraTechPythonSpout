@@ -3,3 +3,4 @@ SpoutGL
 PyQt5
 pyqtgraph
 numpy
+python-osc
