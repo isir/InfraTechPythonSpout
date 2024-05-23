@@ -5,8 +5,16 @@ from IRBGrab import isirgrab as grab
 from pythonosc import udp_client
 import cv2
 
+def getArgsStr(args:argparse.Namespace) -> str:
+    res = ""
+    for i, arg in enumerate(vars(args)):
+        if i==0:
+            res += f"{arg}: {getattr(args, arg)}"
+        else:
+            res += f", {arg}: {getattr(args, arg)}"
+    return res
 
-if __name__ == '__main__': 
+def main(argv):
     parser = argparse.ArgumentParser("python main.py", description='Grab frame from IRBIS IR Camera and send them to "Spout" (texture sharing memory)',
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--device', '-s', help="Device name to grab from", type=str, default="variocamhd")
@@ -30,14 +38,17 @@ if __name__ == '__main__':
         #i.create_device("simulator")
         i.connect()
         spout_name = i.getSpoutName(0)
+        print("-------------------")
+        print("Launched with options:", getArgsStr(args))
         try:
             print("--- Press CTRL+C to exit ---")
             while True:
                 time.sleep(1/30)
                 if i.frame_ir_ok:
-                    i.frame_ir = cv2.putText(i.frame_ir, f"Sharing to spout {spout_name}, T min {min_t}, max {max_t}", (50, 50) , cv2.FONT_HERSHEY_SIMPLEX  ,  
-                    0.5, (250, 250, 250), 1, cv2.LINE_AA) 
-                    cv2.imshow("IRBIS_Grap", i.frame_ir)                    
+                    frame = cv2.putText(i.frame_ir, f"Sharing to spout {spout_name}, T min {min_t}, max {max_t}",
+                                              (20, 20) , cv2.FONT_HERSHEY_SIMPLEX ,  0.35, (250, 250, 250), 1, cv2.LINE_AA) 
+                    cv2.putText(frame, "Press Q to quit", (20, 40) , cv2.FONT_HERSHEY_SIMPLEX ,  0.35, (250, 250, 250), 1, cv2.LINE_AA) 
+                    cv2.imshow("IRBIS_Grap", frame)                    
                     if frameid%50==0:
                         osc_client.send_message("/irbis/min_t", min_t)
                         osc_client.send_message("/irbis/max_t", max_t)
@@ -52,5 +63,7 @@ if __name__ == '__main__':
         i.free_dll()
     except Exception as e:
         print(e)
-        
+
+if __name__ == '__main__': 
+    main(sys.argv[1:])        
 
